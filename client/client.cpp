@@ -37,63 +37,93 @@ int main()
         return 1;
     }
 
-    // Input username and password
     std::string username, password;
     std::cout << "Enter username: ";
-    std::cin >> username;
+    std::getline(std::cin, username);
     std::cout << "Enter password: ";
-    std::cin >> password;
+    std::getline(std::cin, password);
 
     std::string credentials = username + ":" + password + "\n";
     send(sock, credentials.c_str(), credentials.size(), 0);
 
-    // Wait for server response
     char response[1024];
     memset(response, 0, sizeof(response));
-    read(sock, response, sizeof(response));
+    int bytes = read(sock, response, sizeof(response) - 1);
 
-    if (std::string(response).find("LOGIN_SUCCESS") == std::string::npos)
+    if (bytes <= 0)
     {
-        std::cout << response;
+        std::cerr << "Server closed the connection.\n";
+        close(sock);
+        return 1;
+    }
 
-        std::string userChoice;
-        std::cout << "User not found!\nDo you want to register as a new User?(yes/no)\n"
-                  << std::endl;
-        std::cin >> userChoice;
-        if (userChoice == "yes")
+    std::string server_response(response);
+
+    if (server_response.find("LOGIN_SUCCESS") != std::string::npos)
+    {
+        std::cout << "Login successful!\n";
+    }
+    else if (server_response.find("LOGIN_FAILED") != std::string::npos)
+    {
+        std::cout << "Login failed.\nDo you want to register as a new user? (yes/no): ";
+        std::string choice;
+        std::cin >> choice;
+
+        if (choice == "yes")
         {
-            std::string registerRequest = "REGISTER\n";
-            send(sock, registerRequest.c_str(), registerRequest.size(), 0);
+            std::string register_msg = "REGISTER\n";
+            send(sock, register_msg.c_str(), register_msg.size(), 0);
 
             memset(response, 0, sizeof(response));
-            read(sock, response, sizeof(response));
+            read(sock, response, sizeof(response) - 1);
+
+            server_response = response;
+            server_response.erase(server_response.find_last_not_of("\n\r") + 1);
+
+            if (std::string(response).find("SEND_NEW_CREDENTIALS") == std::string::npos)
+            {
+                std::cerr << "Unexpected server response: " << response << std::endl;
+                close(sock);
+                return 1;
+            }
+
+            std::string newCred = username + ":" + password + "\n";
+            std::cout << "----New Cred: " << newCred << std::endl;
+            send(sock, newCred.c_str(), newCred.size(), 0);
+
+            memset(response, 0, sizeof(response));
+            read(sock, response, sizeof(response) - 1);
 
             if (std::string(response).find("REGISTER_SUCCESS") != std::string::npos)
             {
-                std::cout << "Registered and logged in successfully!\n";
+                std::cout << "Registration successful!\n";
             }
             else
             {
-                std::cout << "Registration failed: " << response << std::endl;
+                std::cout << "Registration failed: " << response;
                 close(sock);
                 return 1;
             }
         }
         else
         {
-            std::cout << "Registration aborted, closing connection..." << std::endl;
+            std::cout << "Exiting...\n";
             close(sock);
             return 1;
         }
     }
+    else
+    {
+        std::cerr << "Unknown server response: " << server_response << std::endl;
+        close(sock);
+        return 1;
+    }
 
     std::cout << "Welcome to the chat, " << username << "!\n";
 
-    // Start receiving thread
     std::thread recv_thread(receive_messages, sock);
     recv_thread.detach();
 
-    // Sending loop
     std::string input;
     while (std::getline(std::cin, input))
     {
