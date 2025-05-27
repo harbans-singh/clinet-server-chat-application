@@ -78,22 +78,17 @@ void handle_client(int client_socket)
             std::string newUser = newCred.substr(0, delimiterPos);
             std::string newPass = newCred.substr(delimiterPos + 1);
 
-            if (user_db.count(newUser))
+            if (registerUser(newUser, newPass))
             {
-                std::string fail = "REGISTER_FAILED: User already exists\n";
-                send(client_socket, fail.c_str(), fail.length(), 0);
-            }
-            else
-            {
-                // Add user to DB
-                user_db[newUser] = newPass;
-
                 authenticated = true;
                 username = newUser;
 
                 {
                     std::lock_guard<std::mutex> lock(clients_mutex);
-                    clients.push_back(client_socket);
+                    if (std::find(clients.begin(), clients.end(), client_socket) == clients.end())
+                    {
+                        clients.push_back(client_socket);
+                    }
                 }
 
                 {
@@ -104,6 +99,11 @@ void handle_client(int client_socket)
                 std::string success = "REGISTER_SUCCESS\n";
                 send(client_socket, success.c_str(), success.length(), 0);
             }
+            else
+            {
+                std::string fail = "REGISTER_FAILED: User exists\n";
+                send(client_socket, fail.c_str(), fail.length(), 0);
+            }
         }
         else
         {
@@ -112,7 +112,10 @@ void handle_client(int client_socket)
                 authenticated = true;
                 {
                     std::lock_guard<std::mutex> lock(clients_mutex);
-                    clients.push_back(client_socket);
+                    if (std::find(clients.begin(), clients.end(), client_socket) == clients.end())
+                    {
+                        clients.push_back(client_socket);
+                    }
                 }
 
                 {
@@ -141,7 +144,6 @@ void handle_client(int client_socket)
         }
 
         std::string raw_message(buffer);
-        std::cout << "-----Raw message: " << username << " : " << raw_message << std::endl;
         raw_message.erase(raw_message.find_last_not_of("\n\r") + 1);
 
         if (raw_message.rfind("/", 0) == 0)
@@ -215,8 +217,8 @@ void handle_client(int client_socket)
         }
         else
         {
-            std::string message = username + ": " + raw_message;
-            std::cout << message << std::endl;
+            std::string message = username + ": " + raw_message + "\n";
+            std::cout << message;
             broadcast_message(message, client_socket);
         }
     }
@@ -236,6 +238,7 @@ void handle_client(int client_socket)
 
 int main()
 {
+    initDatabase();
     int server_fd;
     struct sockaddr_in address;
     int opt = 1;
