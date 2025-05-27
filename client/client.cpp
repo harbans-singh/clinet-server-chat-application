@@ -88,7 +88,6 @@ int main()
             }
 
             std::string newCred = username + ":" + password + "\n";
-            std::cout << "----New Cred: " << newCred << std::endl;
             send(sock, newCred.c_str(), newCred.size(), 0);
 
             memset(response, 0, sizeof(response));
@@ -120,6 +119,8 @@ int main()
     }
 
     std::cout << "Welcome to the chat, " << username << "!\n";
+
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
     std::thread recv_thread(receive_messages, sock);
     recv_thread.detach();
