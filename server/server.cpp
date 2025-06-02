@@ -13,7 +13,7 @@
 
 #define SERVER_PORT 8080
 
-std::vector<int> clients;
+std::unordered_map<int, std::string> clients;
 std::mutex clients_mutex;
 std::mutex auth_clients_mutex;
 std::unordered_map<int, std::string> authenticated_clients;
@@ -21,13 +21,27 @@ std::unordered_map<int, std::string> authenticated_clients;
 void broadcast_message(const std::string &message, int sender_fd)
 {
     std::lock_guard<std::mutex> lock(clients_mutex);
-    for (int client_fd : clients)
+    for (auto& [client_fd, client_name] : clients)
     {
         if (client_fd != sender_fd)
         {
             send(client_fd, message.c_str(), message.length(), 0);
         }
     }
+}
+
+void broadcast_user_list(int sender_fd)
+{
+    std::string user_list = "USER_LIST_UPDATE:";
+    bool first = true;
+    for (const auto &entry : clients)
+    {
+        if (!first)
+            user_list += ",";
+        user_list += entry.second;
+        first = false;
+    }
+    broadcast_message(user_list, sender_fd);
 }
 
 void handle_client(int client_socket)
@@ -85,9 +99,9 @@ void handle_client(int client_socket)
 
                 {
                     std::lock_guard<std::mutex> lock(clients_mutex);
-                    if (std::find(clients.begin(), clients.end(), client_socket) == clients.end())
+                    if (clients.find(client_socket) == clients.end())
                     {
-                        clients.push_back(client_socket);
+                        clients.insert({client_socket, username});
                     }
                 }
 
@@ -98,6 +112,7 @@ void handle_client(int client_socket)
 
                 std::string success = "REGISTER_SUCCESS\n";
                 send(client_socket, success.c_str(), success.length(), 0);
+                broadcast_user_list(client_socket);
             }
             else
             {
@@ -112,9 +127,9 @@ void handle_client(int client_socket)
                 authenticated = true;
                 {
                     std::lock_guard<std::mutex> lock(clients_mutex);
-                    if (std::find(clients.begin(), clients.end(), client_socket) == clients.end())
+                    if (clients.find(client_socket) == clients.end())
                     {
-                        clients.push_back(client_socket);
+                        clients.insert({client_socket, username});
                     }
                 }
 
@@ -125,6 +140,7 @@ void handle_client(int client_socket)
 
                 std::string success = "LOGIN_SUCCESS\n";
                 send(client_socket, success.c_str(), success.length(), 0);
+                broadcast_user_list(client_socket);
             }
             else
             {
@@ -188,13 +204,19 @@ void handle_client(int client_socket)
             }
             else if (command == "/exit")
             {
-                std::string msg = username + " has left the chat.\n";
-                broadcast_message(msg, client_socket);
-                close(client_socket);
+                {
+                    std::lock_guard<std::mutex> lock(clients_mutex);
+                    clients.erase(client_socket);
+                }
+
                 {
                     std::lock_guard<std::mutex> lock(auth_clients_mutex);
                     authenticated_clients.erase(client_socket);
                 }
+                std::string msg = username + " has left the chat.\n";
+                broadcast_message(msg, client_socket);
+                broadcast_user_list(client_socket);
+                close(client_socket);
                 return;
             }
             else if (command == "/help")
@@ -218,14 +240,13 @@ void handle_client(int client_socket)
         else
         {
             std::string message = username + ": " + raw_message + "\n";
-            std::cout << message;
             broadcast_message(message, client_socket);
         }
     }
 
     {
         std::lock_guard<std::mutex> lock(clients_mutex);
-        clients.erase(std::remove(clients.begin(), clients.end(), client_socket), clients.end());
+        clients.erase(client_socket);
         {
             std::lock_guard<std::mutex> lock(auth_clients_mutex);
             authenticated_clients.erase(client_socket);
@@ -233,6 +254,7 @@ void handle_client(int client_socket)
         std::string fail = "LOGIN_FAILED\n";
         send(client_socket, fail.c_str(), fail.length(), 0);
     }
+    broadcast_user_list(client_socket);
     close(client_socket);
 }
 

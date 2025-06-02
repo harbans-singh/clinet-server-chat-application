@@ -1,7 +1,7 @@
 CXX = g++
 CXXFLAGS = -Wall -std=c++17 -pthread
 
-LDFLAGS = -lsqlite3
+LDFLAGS = -lsqlite3 -lncurses
 
 SERVER_DIR = server
 CLIENT_DIR = client
@@ -25,7 +25,7 @@ $(SERVER_BIN): $(SERVER_OBJS)
 
 # Build client binary
 $(CLIENT_BIN): $(CLIENT_OBJS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Compile server.o
 $(BUILD_DIR)/server.o: $(SERVER_DIR)/server.cpp $(SERVER_DIR)/authentication.h | $(BUILD_DIR)

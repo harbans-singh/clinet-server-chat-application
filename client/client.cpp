@@ -4,8 +4,46 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <cstring>
+#include <ncurses.h>
+#include <mutex>
+#include <vector>
+#include <sstream>
 
 #define SERVER_PORT 8080
+
+WINDOW *userWin, *chatWin, *inputWin;
+std::mutex mtx;
+std::vector<std::string> onlineUsers;
+
+void update_user_list()
+{
+    werase(userWin);
+    box(userWin, 0, 0);
+    mvwprintw(userWin, 0, 2, " Online Users ");
+    int line = 1;
+    for (const auto &user : onlineUsers)
+    {
+        mvwprintw(userWin, line++, 2, "%s", user.c_str());
+    }
+    wrefresh(userWin);
+}
+
+void add_chat_line(const std::string &line)
+{
+    static int row = 1;
+    mtx.lock();
+    int max_y, max_x;
+    getmaxyx(chatWin, max_y, max_x);
+    if (row >= max_y - 1)
+    {
+        werase(chatWin);
+        box(chatWin, 0, 0);
+        row = 1;
+    }
+    mvwprintw(chatWin, row++, 2, "%s", line.c_str());
+    wrefresh(chatWin);
+    mtx.unlock();
+}
 
 void receive_messages(int sockfd)
 {
@@ -16,10 +54,29 @@ void receive_messages(int sockfd)
         int bytes_read = read(sockfd, buffer, sizeof(buffer) - 1);
         if (bytes_read <= 0)
         {
-            std::cout << "Disconnected from server.\n";
+            add_chat_line("Disconnected from server.");
             break;
         }
-        std::cout << buffer << std::flush;
+
+        std::string msg(buffer);
+        if (msg.find("USER_LIST_UPDATE:") == 0)
+        {
+            // Example message: USER_LIST_UPDATE:user1,user2,...
+            onlineUsers.clear();
+            std::string list = msg.substr(msg.find(":") + 1);
+            std::istringstream iss(list);
+            std::string user;
+            while (std::getline(iss, user, ','))
+            {
+                if (!user.empty())
+                    onlineUsers.push_back(user);
+            }
+            update_user_list();
+        }
+        else
+        {
+            add_chat_line(msg);
+        }
     }
 }
 
@@ -118,20 +175,66 @@ int main()
         return 1;
     }
 
-    std::cout << "Welcome to the chat, " << username << "!\n";
+    // std::cout << "Welcome to the chat, " << username << "!\n";
 
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    // std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+    // std::thread recv_thread(receive_messages, sock);
+    // recv_thread.detach();
+
+    // std::string input;
+    // while (std::getline(std::cin, input))
+    // {
+    //     input += "\n";
+    //     send(sock, input.c_str(), input.size(), 0);
+    // }
+
+    initscr();
+    cbreak();
+    noecho();
+    int height, width;
+    getmaxyx(stdscr, height, width);
+
+    int userWinWidth = 30;
+    int inputWinHeight = 5;
+    int chatWinHeight = height - inputWinHeight;
+    int chatWinWidth = width - userWinWidth;
+
+    // Correct dimensions
+    userWin = newwin(height, userWinWidth, 0, 0);                                 // full-height user window
+    chatWin = newwin(chatWinHeight, chatWinWidth, 0, userWinWidth);               // chat window to the right
+    inputWin = newwin(inputWinHeight, chatWinWidth, chatWinHeight, userWinWidth); // bottom input window
+
+    keypad(inputWin, TRUE);
+
+    scrollok(chatWin, TRUE);
+    box(userWin, 0, 0);
+    box(chatWin, 0, 0);
+    box(inputWin, 0, 0);
+    wrefresh(userWin);
+    wrefresh(chatWin);
+    wrefresh(inputWin);
 
     std::thread recv_thread(receive_messages, sock);
     recv_thread.detach();
 
-    std::string input;
-    while (std::getline(std::cin, input))
+    char input_buffer[512];
+
+    while (true)
     {
-        input += "\n";
-        send(sock, input.c_str(), input.size(), 0);
+        std::cout << "----In While" << std::endl;
+        werase(inputWin);
+        box(inputWin, 0, 0);
+        mvwgetnstr(inputWin, 1, 2, input_buffer, sizeof(input_buffer) - 1);
+        std::string message = input_buffer;
+        if (!message.empty())
+        {
+            message += "\n";
+            send(sock, message.c_str(), message.size(), 0);
+        }
     }
 
     close(sock);
+    endwin();
     return 0;
 }
